@@ -24,10 +24,23 @@ import static org.junit.Assert.assertTrue;
 public class TypeResolverTest {
 
     @Test
-    public void testTypeResolutionForInterface() {
+    public void testTypeResolutionWithBaseClass() {
         GraphQLSchema schema = new TestSchemaGenerator()
                 .withResolverBuilders(new AnnotatedResolverBuilder())
                 .withOperationsFromSingleton(new RootQuery())
+                .generate();
+
+        GraphQL exe = GraphQL.newGraphQL(schema).build();
+        ExecutionResult res = exe.execute("{contents {id title}}");
+        System.out.println(res.getErrors());
+        assertTrue(res.getErrors().isEmpty());
+    }
+
+    @Test
+    public void testTypeResolutionWithoutBaseClass() {
+        GraphQLSchema schema = new TestSchemaGenerator()
+                .withResolverBuilders(new AnnotatedResolverBuilder())
+                .withOperationsFromSingleton(new RootQuery2())
                 .generate();
 
         GraphQL exe = GraphQL.newGraphQL(schema).build();
@@ -44,6 +57,17 @@ public class TypeResolverTest {
                     new Movie("3", "The Ring", "R"),
                     new Movie("4", "Brazil", "R"),
                     new TVShow("5", "Simpsons", 1, 2));
+        }
+    }
+
+    public static class RootQuery2 {
+        @GraphQLQuery
+        public List<Content> contents() {
+            return Arrays.asList(new Trailer2("1", "Argo"),
+                    new Trailer2("2", "Gravity"),
+                    new Movie2("3", "The Ring", "R"),
+                    new Movie2("4", "Brazil", "R"),
+                    new TVShow2("5", "Simpsons", 1, 2));
         }
     }
 
@@ -97,6 +121,71 @@ public class TypeResolverTest {
             this.seasonNumber = seasonNumber;
             this.episodeNumber = episodeNumber;
         }
+
+        @GraphQLQuery
+        public Integer seasonNumber() {return seasonNumber;}
+
+        @GraphQLQuery
+        public Integer episodeNumber() {return episodeNumber;}
+    }
+
+    public static class Movie2 implements Content {
+        private String id;
+        private String title;
+        private String rating;
+        Movie2(String id, String title, String rating) {
+            this.id = id;
+            this.title = title;
+            this.rating = rating;
+        }
+
+        @Override
+        @GraphQLQuery
+        public String id() {return id;}
+
+        @Override
+        @GraphQLQuery
+        public String title() {return title;}
+
+        @GraphQLQuery
+        public String rating() {return rating;}
+    }
+
+    public static class Trailer2 implements Content {
+        private String id;
+        private String title;
+        Trailer2(String id, String title) {
+            this.id = id;
+            this.title = title;
+        }
+        @Override
+        @GraphQLQuery
+        public String id() {return id;}
+
+        @Override
+        @GraphQLQuery
+        public String title() {return title;}
+    }
+
+    public static class TVShow2 implements Content {
+        private Integer seasonNumber;
+        private Integer episodeNumber;
+        private String id;
+        private String title;
+        TVShow2(String id, String title, Integer seasonNumber, Integer episodeNumber) {
+            this.id = id;
+            this.title = title;
+            this.seasonNumber = seasonNumber;
+            this.episodeNumber = episodeNumber;
+        }
+
+        @Override
+        @GraphQLQuery
+        public String id() {return id;}
+
+        @Override
+        @GraphQLQuery
+        public String title() {return title;}
 
         @GraphQLQuery
         public Integer seasonNumber() {return seasonNumber;}
