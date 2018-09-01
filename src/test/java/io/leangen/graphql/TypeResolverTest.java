@@ -1,108 +1,107 @@
 package io.leangen.graphql;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import graphql.ExecutionResult;
 import graphql.GraphQL;
+import graphql.schema.GraphQLFieldDefinition;
 import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLSchema;
 import io.leangen.graphql.annotations.GraphQLArgument;
+import io.leangen.graphql.annotations.GraphQLContext;
 import io.leangen.graphql.annotations.GraphQLQuery;
-import io.leangen.graphql.annotations.GraphQLTypeResolver;
 import io.leangen.graphql.annotations.types.GraphQLInterface;
-import io.leangen.graphql.domain.Education;
-import io.leangen.graphql.domain.Street;
-import io.leangen.graphql.execution.TypeResolutionEnvironment;
-import io.leangen.graphql.execution.TypeResolver;
+import io.leangen.graphql.metadata.strategy.query.AnnotatedResolverBuilder;
 import org.junit.Test;
 
-import java.util.Collections;
+import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Stream;
 
-import static io.leangen.graphql.support.QueryResultAssertions.assertNoErrors;
-import static io.leangen.graphql.support.QueryResultAssertions.assertValueAtPathEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
 
-/**
- * @author Bojan Tomic (kaqqao)
- */
 public class TypeResolverTest {
 
     @Test
-    public void testTypeResolver() {
+    public void testTypeResolutionForInterface() {
         GraphQLSchema schema = new TestSchemaGenerator()
-                .withOperationsFromSingleton(new RepoService())
+                .withResolverBuilders(new AnnotatedResolverBuilder())
+                .withOperationsFromSingleton(new RootQuery())
                 .generate();
 
         GraphQL exe = GraphQL.newGraphQL(schema).build();
-        String queryTemplate = "{repo(id: %d) {" +
-                "identifier,  " +
-                "... on SessionRepo_Street {street: item {name}} " +
-                "... on SessionRepo_Education {school: item {schoolName}}}}";
-        ExecutionResult result = exe.execute(String.format(queryTemplate, 2));
-        assertNoErrors(result);
-        assertValueAtPathEquals("Baker street", result, "repo.0.0.street.name");
-//        exe.execute("{repo(id: 3) {key {identifier  ... on SessionRepo_Street {street: item {name}} ... on SessionRepo_Education {school: item {schoolName}}}}}}", new HashMap<>());
-//        result = exe.execute("{repo(id: 3) {identifier  ... on SessionRepo_Street {street: item {name}} }}");
-        result = exe.execute(String.format(queryTemplate, 3));
-        assertNoErrors(result);
-        assertValueAtPathEquals("Alma Mater", result, "repo.0.0.school.schoolName");
+        ExecutionResult res = exe.execute("{contents {id title}}");
+        System.out.println(res.getErrors());
+        assertTrue(res.getErrors().isEmpty());
     }
-    
-    public static class RepoService {
 
-        @GraphQLQuery(name = "repo")
-        public List<Stream<GenericRepo>> getRepo(@GraphQLArgument(name = "id") int id) {
-            if (id % 2 == 0) {
-                return Collections.singletonList(Stream.of(new SessionRepo<>(new Street("Baker street", 1))));
-            } else {
-                return Collections.singletonList(Stream.of(new SessionRepo<>(new Education("Alma Mater", 1600, 1604))));
-            }
-        }
-
-        @GraphQLQuery(name = "repo1")
-        public SessionRepo<Street> repo1() {
-            return null;
-        }
-
-        @GraphQLQuery(name = "repo2")
-        public SessionRepo<Education> repo2() {
-            return null;
+    public static class RootQuery {
+        @GraphQLQuery
+        public List<Content> contents() {
+            return Arrays.asList(new Trailer("1", "Argo"),
+                    new Trailer("2", "Gravity"),
+                    new Movie("3", "The Ring", "R"),
+                    new Movie("4", "Brazil", "R"),
+                    new TVShow("5", "Simpsons", 1, 2));
         }
     }
 
-    @GraphQLInterface(name = "GenericRepository")
-    public interface GenericRepo {
+    @GraphQLInterface(name = "Content", implementationAutoDiscovery = true)
+    public interface Content {
+        @GraphQLQuery
+        String id();
 
-        @GraphQLQuery(name = "identifier")
-        String identifier();
+        @GraphQLQuery
+        String title();
     }
 
-    @GraphQLTypeResolver(RepoTypeResolver.class)
-    public static class SessionRepo<T> implements GenericRepo {
-
-        private T item;
-
-        SessionRepo(T item) {
-            this.item = item;
+    public static class ContentBase implements Content {
+        private String id;
+        private String title;
+        ContentBase(String id, String title) {
+            this.title = title;
+            this.id = id;
         }
-
-        @GraphQLQuery(name = "item")
-        public T getStoredItem() {
-            return item;
-        }
+        @Override
+        @GraphQLQuery
+        public String id() {return id;}
 
         @Override
-        @GraphQLQuery(name = "identifier")
-        public String identifier() {
-            return "SESSION";
+        @GraphQLQuery
+        public String title() {return title;}
+    }
+
+    public static class Movie extends ContentBase {
+        private String rating;
+        Movie(String id, String title, String rating) {
+            super(id, title);
+            this.rating = rating;
+        }
+
+        @GraphQLQuery
+        public String rating() {return rating;}
+    }
+
+    public static class Trailer extends ContentBase {
+        Trailer(String id, String title) {
+            super(id, title);
         }
     }
 
-    public static class RepoTypeResolver implements TypeResolver {
-
-        @Override
-        public GraphQLObjectType resolveType(TypeResolutionEnvironment env) {
-            String typeName = "SessionRepo_" + ((SessionRepo) env.getObject()).getStoredItem().getClass().getSimpleName();
-            return (GraphQLObjectType) env.getSchema().getType(typeName);
+    public static class TVShow extends ContentBase {
+        private Integer seasonNumber;
+        private Integer episodeNumber;
+        TVShow(String id, String title, Integer seasonNumber, Integer episodeNumber) {
+            super(id, title);
+            this.seasonNumber = seasonNumber;
+            this.episodeNumber = episodeNumber;
         }
+
+        @GraphQLQuery
+        public Integer seasonNumber() {return seasonNumber;}
+
+        @GraphQLQuery
+        public Integer episodeNumber() {return episodeNumber;}
     }
 }
