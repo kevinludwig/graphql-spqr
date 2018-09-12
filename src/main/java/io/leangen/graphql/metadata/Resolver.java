@@ -96,7 +96,7 @@ public class Resolver {
      * @throws IllegalAccessException If a reflective invocation of the underlying method/field is not allowed
      */
     @SuppressWarnings("unchecked")
-    public Object resolve(Object source, Object[] args) throws Throwable {
+    public Object resolve(Object source, Object[] args) throws InvocationTargetException, IllegalAccessException {
         return executable.execute(source, args);
     }
 
@@ -169,7 +169,7 @@ public class Resolver {
 
     @Override
     public boolean equals(Object that) {
-        return this == that || that instanceof Resolver && this.executable.equals(((Resolver) that).executable);
+        return this == that || (that instanceof Resolver && this.executable.equals(((Resolver) that).executable));
     }
 
     @Override

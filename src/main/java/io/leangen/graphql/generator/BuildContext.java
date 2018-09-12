@@ -5,6 +5,7 @@ import graphql.schema.GraphQLInterfaceType;
 import graphql.schema.GraphQLType;
 import graphql.schema.TypeResolver;
 import io.leangen.graphql.execution.GlobalEnvironment;
+import io.leangen.graphql.execution.ResolverInterceptorFactory;
 import io.leangen.graphql.generator.mapping.SchemaTransformerRegistry;
 import io.leangen.graphql.generator.mapping.TypeMapperRegistry;
 import io.leangen.graphql.generator.mapping.strategy.AbstractInputHandler;
@@ -22,10 +23,13 @@ import io.leangen.graphql.util.ClassUtils;
 import io.leangen.graphql.util.GraphQLUtils;
 
 import java.lang.reflect.AnnotatedType;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -53,8 +57,10 @@ public class BuildContext {
     public final AbstractInputHandler abstractInputHandler;
     public final ImplementationDiscoveryStrategy implDiscoveryStrategy;
     public final TypeInfoGenerator typeInfoGenerator;
+    public final ResolverInterceptorFactory interceptorFactory;
     public final RelayMappingConfig relayMappingConfig;
     public final ClassFinder classFinder;
+    public final List<Consumer<BuildContext>> postBuildHooks;
 
     final Validator validator;
 
@@ -72,6 +78,7 @@ public class BuildContext {
      * @param scalarStrategy The strategy deciding how abstract Java types are discovered
      * @param abstractInputHandler The strategy deciding what Java type gets mapped to a GraphQL interface
      * @param inputFieldBuilders The strategy deciding how GraphQL input fields are discovered from Java types
+     * @param interceptorFactory The factory to use to obtain interceptors applicable to a resolver
      * @param relayMappingConfig Relay specific configuration
      * @param knownTypes The cache of known type names
      */
@@ -79,12 +86,13 @@ public class BuildContext {
                         TypeMapperRegistry typeMappers, SchemaTransformerRegistry transformers, ValueMapperFactory valueMapperFactory, TypeInfoGenerator typeInfoGenerator,
                         MessageBundle messageBundle, InterfaceMappingStrategy interfaceStrategy,
                         ScalarDeserializationStrategy scalarStrategy, TypeTransformer typeTransformer, AbstractInputHandler abstractInputHandler,
-                        InputFieldBuilderRegistry inputFieldBuilders, InclusionStrategy inclusionStrategy,
+                        InputFieldBuilderRegistry inputFieldBuilders, ResolverInterceptorFactory interceptorFactory, InclusionStrategy inclusionStrategy,
                         RelayMappingConfig relayMappingConfig, Collection<GraphQLType> knownTypes, Comparator<AnnotatedType> typeComparator,
                         ImplementationDiscoveryStrategy implementationStrategy) {
         this.operationRegistry = operationRegistry;
         this.typeRegistry = environment.typeRegistry;
         this.transformers = transformers;
+        this.interceptorFactory = interceptorFactory;
         this.typeCache = new TypeCache(knownTypes);
         this.typeMappers = typeMappers;
         this.typeInfoGenerator = typeInfoGenerator;
@@ -108,6 +116,7 @@ public class BuildContext {
         this.relayMappingConfig = relayMappingConfig;
         this.classFinder = new ClassFinder();
         this.validator = new Validator(environment, typeMappers, knownTypes, typeComparator);
+        this.postBuildHooks = new ArrayList<>(Collections.singletonList(context -> classFinder.close()));
     }
 
     public String interpolate(String template) {
@@ -126,5 +135,9 @@ public class BuildContext {
 
     void resolveTypeReferences() {
         typeCache.resolveTypeReferences(typeRegistry);
+    }
+
+    public void executePostBuildHooks() {
+        postBuildHooks.forEach(hook -> hook.accept(this));
     }
 }

@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- Upgraded to [graphql-java 10.0](https://github.com/graphql-java/graphql-java/releases)
+- Introduced [`SchemaTransformer`](https://github.com/leangen/graphql-spqr/blob/master/src/main/java/io/leangen/graphql/generator/mapping/SchemaTransformer.java) to enable modifying field and argument definitions
+- Introduced [`ResolverInterceptor`](https://github.com/leangen/graphql-spqr/blob/master/src/main/java/io/leangen/graphql/execution/ResolverInterceptor.java) that can perform arbitrary logic around the invocation of the underlying method/field [#180](https://github.com/leangen/graphql-spqr/issues/180) [#92](https://github.com/leangen/graphql-spqr/issues/92)
+- Added a way to get all deserialized arguments `ResolutionEnvironment` [#174](https://github.com/leangen/graphql-spqr/issues/174)
+- All exceptions thrown during field resolution now bubble up unchanged (using sneaky-throw)
+- Try loading implementation classes using the parent class' loader first [#177](https://github.com/leangen/graphql-spqr/issues/177)
+- Renamed `withTypeAliasGroup` to `withTypeSynonymGroup`
+
+### Fixed
+- Fixed interface type resolution logic [#168](https://github.com/leangen/graphql-spqr/issues/168)
+- Arguments with default values will no longer be mapped as non-null [#163](https://github.com/leangen/graphql-spqr/issues/163)
+- `javax.annotation.Nonnull` works again [#165](https://github.com/leangen/graphql-spqr/issues/165)
+
 ## [0.9.8] - 2018-08-19
 ### Added
 - Underlying `AnnotatedType` now accessible from the produced `GraphQLType` [#139](https://github.com/leangen/graphql-spqr/issues/139)

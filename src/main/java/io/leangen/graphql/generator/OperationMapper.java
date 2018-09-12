@@ -21,6 +21,7 @@ import io.leangen.graphql.annotations.GraphQLId;
 import io.leangen.graphql.execution.ContextWrapper;
 import io.leangen.graphql.execution.GlobalEnvironment;
 import io.leangen.graphql.execution.OperationExecutor;
+import io.leangen.graphql.execution.ResolverInterceptorFactory;
 import io.leangen.graphql.generator.mapping.TypeMapper;
 import io.leangen.graphql.metadata.InputField;
 import io.leangen.graphql.metadata.Operation;
@@ -155,7 +156,7 @@ public class OperationMapper {
                 .filter(OperationArgument::isMappable)
                 .map(OperationArgument::getJavaType);
         ValueMapper valueMapper = buildContext.createValueMapper(inputTypes);
-        fieldBuilder.dataFetcher(createResolver(operation, valueMapper, buildContext.globalEnvironment));
+        fieldBuilder.dataFetcher(createResolver(operation, valueMapper, buildContext.globalEnvironment, buildContext.interceptorFactory));
         fieldBuilder.withDirective(Directives.mappedOperation(operation));
 
         return buildContext.transformers.transform(fieldBuilder.build(), operation, this, buildContext);
@@ -276,19 +277,12 @@ public class OperationMapper {
                         .name("input")
                         .type(new GraphQLNonNull(inputObjectType)))
                 .dataFetcher(env -> {
-                    @SuppressWarnings("unchecked") Map<String, Object> input = (Map<String, Object>) env.getArguments().get("input");
-                    env.getArguments().clear();
-                    env.getArguments().putAll(input);
+                    DataFetchingEnvironment innerEnv = new RelayDataFetchingEnvironmentDecorator(env);
                     if (env.getContext() instanceof ContextWrapper) {
                         ContextWrapper context = env.getContext();
-                        context.setClientMutationId(env.getArgument(CLIENT_MUTATION_ID));
-//                        if (!(mutation.getType() instanceof GraphQLObjectType)) {
-//                            Object result = mutation.getDataFetcher().get(env);
-//                            context.putExtension("result", result);
-//                            return result;
-//                        }
+                        context.setClientMutationId(innerEnv.getArgument(CLIENT_MUTATION_ID));
                     }
-                    return mutation.getDataFetcher().get(env);
+                    return mutation.getDataFetcher().get(innerEnv);
                 })
                 .build();
     }
@@ -300,14 +294,15 @@ public class OperationMapper {
      * @param operation The operation for which the resolver is being created
      * @param valueMapper Mapper to be used to deserialize raw argument values
      * @param globalEnvironment The shared context containing all the global information needed for operation resolution
+     * @param interceptorFactory A factory producing interceptors applicable to the given {@code operation}'s resolvers
      *
      * @return The resolver for the given operation
      */
-    private DataFetcher createResolver(Operation operation, ValueMapper valueMapper, GlobalEnvironment globalEnvironment) {
+    private DataFetcher createResolver(Operation operation, ValueMapper valueMapper, GlobalEnvironment globalEnvironment, ResolverInterceptorFactory interceptorFactory) {
         if (operation.isBatched()) {
-            return (BatchedDataFetcher) environment -> new OperationExecutor(operation, valueMapper, globalEnvironment).execute(environment);
+            return (BatchedDataFetcher) environment -> new OperationExecutor(operation, valueMapper, globalEnvironment, interceptorFactory).execute(environment);
         }
-        return new OperationExecutor(operation, valueMapper, globalEnvironment)::execute;
+        return new OperationExecutor(operation, valueMapper, globalEnvironment, interceptorFactory)::execute;
     }
 
     /**
@@ -325,9 +320,9 @@ public class OperationMapper {
         return env -> {
             String typeName;
             try {
-                typeName = relay.fromGlobalId((String) env.getArguments().get(GraphQLId.RELAY_ID_FIELD_NAME)).getType();
+                typeName = relay.fromGlobalId(env.getArgument(GraphQLId.RELAY_ID_FIELD_NAME)).getType();
             } catch (Exception e) {
-                throw new IllegalArgumentException(env.getArguments().get(GraphQLId.RELAY_ID_FIELD_NAME) + " is not a valid Relay node ID");
+                throw new IllegalArgumentException(env.getArgument(GraphQLId.RELAY_ID_FIELD_NAME) + " is not a valid Relay node ID");
             }
             if (!nodeQueriesByType.containsKey(typeName)) {
                 throw new IllegalArgumentException(typeName + " is not a Relay node type or no registered query can fetch it by ID");

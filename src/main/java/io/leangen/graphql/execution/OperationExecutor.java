@@ -8,8 +8,12 @@ import io.leangen.graphql.metadata.OperationArgument;
 import io.leangen.graphql.metadata.Resolver;
 import io.leangen.graphql.metadata.strategy.value.ValueMapper;
 
-import java.lang.reflect.InvocationTargetException;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static io.leangen.graphql.util.GraphQLUtils.CLIENT_MUTATION_ID;
 
@@ -21,38 +25,40 @@ public class OperationExecutor {
     private final Operation operation;
     private final ValueMapper valueMapper;
     private final GlobalEnvironment globalEnvironment;
+    private final Map<Resolver, List<ResolverInterceptor>> interceptors;
 
-    public OperationExecutor(Operation operation, ValueMapper valueMapper, GlobalEnvironment globalEnvironment) {
+    public OperationExecutor(Operation operation, ValueMapper valueMapper, GlobalEnvironment globalEnvironment, ResolverInterceptorFactory interceptorFactory) {
         this.operation = operation;
         this.valueMapper = valueMapper;
         this.globalEnvironment = globalEnvironment;
+        this.interceptors = operation.getResolvers().stream().collect(Collectors.toMap(Function.identity(), interceptorFactory::getInterceptors));
     }
 
     public Object execute(DataFetchingEnvironment env) {
         Resolver resolver;
         if (env.getContext() instanceof ContextWrapper) {
             ContextWrapper context = env.getContext();
-            if (env.getArguments().get(CLIENT_MUTATION_ID) != null) {
-                context.setClientMutationId((String) env.getArguments().get(CLIENT_MUTATION_ID));
+            if (env.getArgument(CLIENT_MUTATION_ID) != null) {
+                context.setClientMutationId(env.getArgument(CLIENT_MUTATION_ID));
             }
         }
 
-        resolver = this.operation.getApplicableResolver(env.getArguments().keySet());
+        Map<String, Object> arguments = env.getArguments();
+        resolver = this.operation.getApplicableResolver(arguments.keySet());
         if (resolver == null) {
             throw new GraphQLException("Resolver for operation " + operation.getName() + " accepting arguments: "
-                    + env.getArguments().keySet() + " not implemented");
+                    + arguments.keySet() + " not implemented");
         }
         ResolutionEnvironment resolutionEnvironment = new ResolutionEnvironment(env, this.valueMapper, this.globalEnvironment);
         try {
-            Object result = execute(resolver, resolutionEnvironment, env.getArguments());
+            Object result = execute(resolver, resolutionEnvironment, arguments);
             return resolutionEnvironment.convertOutput(result, resolver.getReturnType());
-        } catch (Throwable throwable) {
-            if (throwable instanceof RuntimeException) {
-                throw (RuntimeException) throwable;
-            } else {
-                throw new RuntimeException(throwable);
-            }
+        } catch (ReflectiveOperationException e) {
+            sneakyThrow(unwrap(e));
+        } catch (Exception e) {
+            sneakyThrow(e);
         }
+        return null; //never happens, needed because of sneakyThrow
     }
 
     /**
@@ -65,11 +71,10 @@ public class OperationExecutor {
      *
      * @return The result returned by the underlying method/field, potentially proxied and wrapped
      *
-     * @throws InvocationTargetException If a reflective invocation of the underlying method/field fails
-     * @throws IllegalAccessException If a reflective invocation of the underlying method/field is not allowed
+     * @throws Exception If the invocation of the underlying method/field or any of the interceptors throws
      */
     private Object execute(Resolver resolver, ResolutionEnvironment resolutionEnvironment, Map<String, Object> rawArguments)
-            throws Throwable {
+            throws Exception {
 
         int queryArgumentsCount = resolver.getArguments().size();
 
@@ -78,8 +83,28 @@ public class OperationExecutor {
             OperationArgument argDescriptor =  resolver.getArguments().get(i);
             Object rawArgValue = rawArguments.get(argDescriptor.getName());
 
-            args[i] = resolutionEnvironment.getInputValue(rawArgValue, argDescriptor.getJavaType(), argDescriptor.getParameter());
+            args[i] = resolutionEnvironment.getInputValue(rawArgValue, argDescriptor);
         }
-        return resolver.resolve(resolutionEnvironment.context, args);
+        InvocationContext invocationContext = new InvocationContext(operation, resolver, resolutionEnvironment, args);
+        Queue<ResolverInterceptor> interceptors = new LinkedList<>(this.interceptors.get(resolver));
+        interceptors.add((ctx, cont) -> resolver.resolve(ctx.getResolutionEnvironment().context, ctx.getArguments()));
+        return execute(invocationContext, interceptors);
+    }
+
+    private Object execute(InvocationContext context, Queue<ResolverInterceptor> interceptors) throws Exception {
+        return interceptors.remove().aroundInvoke(context, (ctx) -> execute(ctx, interceptors));
+    }
+
+    private Throwable unwrap(ReflectiveOperationException e) {
+        Throwable cause = e.getCause();
+        if (cause != null && cause != e) {
+            return cause;
+        }
+        return e;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> void sneakyThrow(Throwable t) throws T {
+        throw (T) t;
     }
 }
